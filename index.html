@@ -160,7 +160,7 @@ details .group { gap: 14px; }
           <button class="btn" id="solveAll">Solve all</button>
           <button class="btn" id="toggle">Hide route</button>
         </div>
-        <button class="btn" id="download" hidden>Download PNG</button>
+        <button class="btn" id="download" disabled>Download solved PNG</button>
         <p class="hint" id="saveHint" hidden>Right-click (or long-press) the solved maze to save it.</p>
       </div>
 
@@ -231,8 +231,19 @@ details .group { gap: 14px; }
   let current = null, showRoute = true, picking = false;
 
   const standalone = (() => { try { return window.self === window.top; } catch (e) { return false; } })();
-  $("download").hidden = !standalone;
-  $("saveHint").hidden = standalone;
+  // Opened as a file the browser saves directly; inside claude.ai the
+  // viewer's downloads capability asks the viewer to confirm the save.
+  let downloads = null;
+  function updateDownload() {
+    const canSave = standalone || !!downloads;
+    $("download").hidden = !canSave;
+    $("saveHint").hidden = canSave;
+    $("download").disabled = !(current && current.result);
+  }
+  updateDownload();
+  if (!standalone && window.claude && window.claude.use) {
+    window.claude.use("downloads").then(d => { downloads = d; updateDownload(); }, () => {});
+  }
 
   const settings = {
     get color() { return $("color").value; },
@@ -414,6 +425,7 @@ details .group { gap: 14px; }
   }
 
   function renderStatus() {
+    updateDownload();
     const st = $("status");
     st.innerHTML = "";
     if (!current) return;
@@ -472,15 +484,31 @@ details .group { gap: 14px; }
     draw();
   };
   $("download").onclick = () => {
-    if (!current) return;
+    if (!current || !current.result) return;
     const c = document.createElement("canvas").getContext("2d");
     paint(c, current, false);
+    const filename = current.name.replace(/\.[^.]+$/, "") + "-solved.png";
     c.canvas.toBlob(blob => {
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = current.name.replace(/\.[^.]+$/, "") + "-solved.png";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      if (!blob) return setMsg("Couldn't create the image file.", true);
+      if (standalone) {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        return;
+      }
+      downloads.save({ filename, data: blob }).then(
+        () => setMsg(`Saved ${filename}.`),
+        e => {
+          const code = e && e.code;
+          if (code === "declined") return;
+          if (code === "rate_limited") return setMsg("A save is already waiting for your answer. Finish that one first.", true);
+          if (code === "too_large") return setMsg("This image is too large to save here.", true);
+          downloads = null;
+          updateDownload();
+          setMsg("Saving isn't available here. Right-click the solved maze to save it.", true);
+        });
     }, "image/png");
   };
 
