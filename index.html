@@ -232,6 +232,7 @@ details .group { gap: 14px; }
 
   const standalone = (() => { try { return window.self === window.top; } catch (e) { return false; } })();
   $("download").hidden = !standalone;
+  $("saveHint").hidden = standalone;
 
   const settings = {
     get color() { return $("color").value; },
